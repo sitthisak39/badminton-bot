@@ -1,3 +1,6 @@
+
+#LINE_EMAIL = 'jankong.sitthisak@gmail.com'
+#LINE_PASSWORD = 'Sakoversky@32'
 import os
 import re
 import sys
@@ -5,6 +8,7 @@ import time
 import traceback
 import threading
 import requests
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
@@ -15,8 +19,6 @@ app = Flask(__name__)
 
 LINE_CHANNEL_ACCESS_TOKEN = 'O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfERmfP4+CfmHByFNjtOT7X3MqBI/5CPBHvbyvnWN7RPPSRY50OHPpCiMa9TueTi2VqWYtp/6V3K7je8DFTl3FT78NI0qLCOEtxGlwdB04t89/1O/w1cDnyilFU='
 LINE_CHANNEL_SECRET = '57bb757a0b33c516d75e0ca9d17d3de7'
-LINE_EMAIL = 'jankong.sitthisak@gmail.com'
-LINE_PASSWORD = 'Sakoversky@32'
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
@@ -49,12 +51,12 @@ def direct_api_booking(target_date, stadium_num, target_round):
         'X-Requested-With': 'XMLHttpRequest'
     })
 
-    # 1. เข้าหน้าแรกเพื่อรับ Session Cookies
+    # 1. รับ Session Cookies
     base_url = "https://hatyaicity.go.th/reservesport/reserve_service/step1/3"
     print("🌐 Getting Session Cookies...")
     session.get(base_url, timeout=15)
 
-    # 2. ดึงข้อมูลรอบเวลา
+    # 2. ดึง HTML รอบเวลา
     round_url = "https://hatyaicity.go.th/reservesport/reserve_service/round_ajax"
     payload = {
         'service_cid': '3',
@@ -74,30 +76,45 @@ def direct_api_booking(target_date, stadium_num, target_round):
     except Exception:
         round_html = res.text
 
-    # ค้นหา ID หรือรอบเวลาจาก Response HTML
-    start_time = target_round.split('-')[0].strip() if '-' in target_round else target_round
-    clean_time = start_time.replace(" น.", "").strip()
+    # 3. ใช้ BeautifulSoup ดึง Value ของเวลาที่ต้องการ
+    soup = BeautifulSoup(round_html, 'html.parser')
+    clean_round_search = target_round.replace(" น.", "").strip()
 
-    if clean_time not in round_html:
-        print(f"DEBUG Response HTML: {round_html[:300]}")
-        return False, f"ไม่พบรอบเวลา {target_round} ในระบบ หรือสนามถูกจองเต็มแล้ว"
+    selected_value = None
+    # ค้นหา label หรือ div ที่มีข้อความเวลา
+    for element in soup.find_all(['label', 'div', 'span']):
+        if clean_round_search in element.get_text():
+            # ค้นหา radio button ที่เกี่ยวข้อง
+            parent = element.find_parent()
+            if parent:
+                radio = parent.find('input', {'type': 'radio'}) or element.find('input', {'type': 'radio'})
+                if radio and radio.get('value'):
+                    selected_value = radio.get('value')
+                    break
 
-    # 3. ส่งคำสั่งยืนยันการจองรอบ
-    # หาค่า round_id จาก HTML ด้วย Regex
-    match = re.search(r'data-id=["\'](\d+)["\'][^>]*>' + re.escape(clean_time), round_html)
-    round_id = match.group(1) if match else None
+    # กรณีหา value ไม่เจอจาก label ให้หาค้นหาใน input โดยตรง
+    if not selected_value:
+        for input_tag in soup.find_all('input', {'type': 'radio'}):
+            val = input_tag.get('value', '')
+            if clean_round_search in val:
+                selected_value = val
+                break
 
+    if not selected_value:
+        print(f"❌ Could not find round value. Raw HTML: {round_html[:500]}")
+        return False, f"ไม่พบรอบเวลา {target_round} หรือสนามเต็มแล้ว"
+
+    # 4. ส่งคำสั่งบันทึกการจองรอบ
     submit_url = "https://hatyaicity.go.th/reservesport/reserve_service/save_round"
     booking_payload = {
         'service_cid': '3',
         'stadium_num': str(stadium_num),
         'choose_date': str(target_date),
-        'round_time': clean_time
+        'round_time': selected_value,
+        'round_id': selected_value
     }
-    if round_id:
-        booking_payload['round_id'] = round_id
 
-    print(f"⚡ Submitting booking request for round: {clean_time}...")
+    print(f"⚡ Submitting booking request with Value: {selected_value}...")
     save_res = session.post(submit_url, data=booking_payload, timeout=15)
 
     if save_res.status_code == 200:
