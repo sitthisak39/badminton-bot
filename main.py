@@ -50,12 +50,10 @@ def direct_api_booking(target_date, stadium_num, target_round):
         'X-Requested-With': 'XMLHttpRequest'
     })
 
-    # 1. รับ Session Cookies
     base_url = "https://hatyaicity.go.th/reservesport/reserve_service/step1/3"
     print("🌐 Getting Session Cookies...")
     session.get(base_url, timeout=15)
 
-    # 2. ดึง HTML รอบเวลา
     round_url = "https://hatyaicity.go.th/reservesport/reserve_service/round_ajax"
     payload = {
         'service_cid': '3',
@@ -75,15 +73,12 @@ def direct_api_booking(target_date, stadium_num, target_round):
     except Exception:
         round_html = res.text
 
-    # 3. ใช้ BeautifulSoup ดึง Value ของเวลาที่ต้องการ
     soup = BeautifulSoup(round_html, 'html.parser')
     clean_round_search = target_round.replace(" น.", "").strip()
 
     selected_value = None
-    # ค้นหา label หรือ div ที่มีข้อความเวลา
     for element in soup.find_all(['label', 'div', 'span']):
         if clean_round_search in element.get_text():
-            # ค้นหา radio button ที่เกี่ยวข้อง
             parent = element.find_parent()
             if parent:
                 radio = parent.find('input', {'type': 'radio'}) or element.find('input', {'type': 'radio'})
@@ -91,7 +86,6 @@ def direct_api_booking(target_date, stadium_num, target_round):
                     selected_value = radio.get('value')
                     break
 
-    # กรณีหา value ไม่เจอจาก label ให้หาค้นหาใน input โดยตรง
     if not selected_value:
         for input_tag in soup.find_all('input', {'type': 'radio'}):
             val = input_tag.get('value', '')
@@ -103,7 +97,6 @@ def direct_api_booking(target_date, stadium_num, target_round):
         print(f"❌ Could not find round value. Raw HTML: {round_html[:500]}")
         return False, f"ไม่พบรอบเวลา {target_round} หรือสนามเต็มแล้ว"
 
-    # 4. ส่งคำสั่งบันทึกการจองรอบ
     submit_url = "https://hatyaicity.go.th/reservesport/reserve_service/save_round"
     booking_payload = {
         'service_cid': '3',
