@@ -11,11 +11,12 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
+# ใส่ค่าจริงครอบด้วยเครื่องหมายอัญประกาศ '...' ได้เลยครับ
 
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfERmfP4+CfmHByFNjtOT7X3MqBI/5CPBHvbyvnWN7RPPSRY50OHPpCiMa9TueTi2VqWYtp/6V3K7je8DFTl3FT78NI0qLCOEtxGlwdB04t89/1O/w1cDnyilFU=', '').strip()
-LINE_CHANNEL_SECRET = os.environ.get('57bb757a0b33c516d75e0ca9d17d3de7', '').strip()
-LINE_EMAIL = os.environ.get('jankong.sitthisak@gmail.com', '').strip()
-LINE_PASSWORD = os.environ.get('Sakoversky@32', '').strip()
+LINE_CHANNEL_ACCESS_TOKEN = 'O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfERmfP4+CfmHByFNjtOT7X3MqBI/5CPBHvbyvnWN7RPPSRY50OHPpCiMa9TueTi2VqWYtp/6V3K7je8DFTl3FT78NI0qLCOEtxGlwdB04t89/1O/w1cDnyilFU='
+LINE_CHANNEL_SECRET = '57bb757a0b33c516d75e0ca9d17d3de7'
+LINE_EMAIL = 'jankong.sitthisak@gmail.com'
+LINE_PASSWORD = 'Sakoversky@32'
 
 print(f"--- Config Check ---")
 print(f"Token length: {len(LINE_CHANNEL_ACCESS_TOKEN)}")
