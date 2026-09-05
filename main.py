@@ -1,3 +1,4 @@
+
 import os
 import sys
 import traceback
@@ -11,17 +12,12 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
-# ใส่ค่าจริงครอบด้วยเครื่องหมายอัญประกาศ '...' ได้เลยครับ
 
 LINE_CHANNEL_ACCESS_TOKEN = 'O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfERmfP4+CfmHByFNjtOT7X3MqBI/5CPBHvbyvnWN7RPPSRY50OHPpCiMa9TueTi2VqWYtp/6V3K7je8DFTl3FT78NI0qLCOEtxGlwdB04t89/1O/w1cDnyilFU='
 LINE_CHANNEL_SECRET = '57bb757a0b33c516d75e0ca9d17d3de7'
 LINE_EMAIL = 'jankong.sitthisak@gmail.com'
 LINE_PASSWORD = 'Sakoversky@32'
 
-print(f"--- Config Check ---")
-print(f"Token length: {len(LINE_CHANNEL_ACCESS_TOKEN)}")
-print(f"Secret length: {len(LINE_CHANNEL_SECRET)}")
-print(f"--------------------")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
@@ -37,7 +33,6 @@ def install_playwright_browsers():
 @app.route("/callback", methods=['POST'])
 def callback():
     if not handler:
-        print("❌ ERROR: Handler is not initialized (Check LINE_CHANNEL_SECRET)")
         return 'LINE Channel Secret Not Configured', 500
 
     signature = request.headers.get('X-Line-Signature', '')
@@ -46,7 +41,6 @@ def callback():
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
-        print("❌ ERROR: Invalid LINE Signature")
         abort(400)
     except Exception as e:
         print(f"❌ ERROR in callback: {e}")
@@ -59,6 +53,7 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
     install_playwright_browsers()
 
     print(f"🚀 Starting Playwright Automation for User: {user_id}")
+    print(f"Target Date: '{target_date}', Stadium: '{stadium_num}', Round: '{target_round}'")
     result_msg = ""
     with sync_playwright() as p:
         try:
@@ -72,6 +67,7 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
             print("🌐 Navigating to Hat Yai Booking Site...")
             page.goto("https://hatyaicity.go.th/reservesport/reserve_service/step1/3", timeout=60000)
 
+            # พยายามเข้าสู่ระบบด้วย LINE
             line_btn = page.locator("a:has-text('LINE'), button:has-text('LINE'), .btn-line")
             if line_btn.count() > 0:
                 line_btn.first.click()
@@ -89,16 +85,17 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
                     allow_btn.click()
                     page.wait_for_timeout(2000)
 
-            print("📅 Selecting Date & Fetching Rounds...")
-            page.evaluate(f"choose_date = '{target_date}';")
+            print("📅 Setting Date & Triggering Round Fetch...")
             page.evaluate(f"$('#choose_date').val('{target_date}');")
+            page.evaluate(f"choose_date = '{target_date}';")
 
+            # สั่งรัน AJAX ดึงรอบสนาม
             page.evaluate(f"""
                 var url = "https://hatyaicity.go.th/reservesport/reserve_service/round_ajax";
                 var param = {{
                     service_cid: '3',
                     stadium_num: '{stadium_num}',
-                    choose_date: $("#choose_date").val(),
+                    choose_date: '{target_date}',
                 }};
                 $.post(url, param, function(data) {{
                     $('#booking_round').html(data['round']);
@@ -108,18 +105,32 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
                 }}, 'json');
             """)
 
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
 
-            print(f"⏰ Selecting Round: {target_round}")
-            target_locator = page.locator(f"text='{target_round}'")
+            # ค้นหาข้อความรอบเวลาแบบยืดหยุ่น (Partial / Contains Match)
+            # ตัด " น." หรือช่องว่างส่วนเกินออกเพื่อใช้ค้นหา
+            clean_round_search = target_round.replace(" น.", "").strip()
+            print(f"⏰ Searching for locator with text: '{clean_round_search}'")
+
+            target_locator = page.locator(f"#booking_round :text('{clean_round_search}')")
+            if target_locator.count() == 0:
+                # ลองค้นหาแบบรวมหน้าเว็บ
+                target_locator = page.locator(f":text('{clean_round_search}')")
+
             if target_locator.count() > 0:
+                print("✅ Found round element! Clicking...")
                 target_locator.first.click()
-                page.evaluate("submitRound();")
-                page.evaluate("submitStep1();")
+                page.wait_for_timeout(1000)
+
+                page.evaluate("if(typeof submitRound === 'function') submitRound();")
+                page.wait_for_timeout(1000)
+                page.evaluate("if(typeof submitStep1 === 'function') submitStep1();")
                 page.wait_for_timeout(2000)
-                page.evaluate("submitStep2();")
+                page.evaluate("if(typeof submitStep2 === 'function') submitStep2();")
+                
                 result_msg = f"🎉 บอททำรายการสำเร็จแล้ว!\nวันที่: {target_date}\nสนาม: {stadium_num}\nรอบ: {target_round}\nโปรดเข้าชำระเงินในระบบเว็บเทศบาลนครหาดใหญ่"
             else:
+                print("❌ Round element not found in DOM.")
                 result_msg = f"❌ ไม่พบรอบเวลา {target_round} หรือสนามเต็มแล้ว"
 
             browser.close()
@@ -142,7 +153,8 @@ def handle_message(event):
             parts = text.split(" ")
             target_date = parts[1]
             stadium_num = parts[2]
-            target_round = f"{parts[3]} {parts[4]} {parts[5]}"
+            # รวมคำสั่งด้านหลังทั้งหมดเป็นเวลา เพื่อป้องกันการตัดคำหลุด
+            target_round = " ".join(parts[3:]).strip()
 
             if line_bot_api:
                 line_bot_api.reply_message(
