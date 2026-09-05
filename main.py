@@ -9,17 +9,6 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from playwright.sync_api import sync_playwright
 
-# ตรวจสอบและดาวน์โหลด Chromium อัตโนมัติก่อนเริ่มแอป
-def install_playwright_browsers():
-    try:
-        print("🌐 Checking & Installing Playwright Chromium...")
-        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-        print("✅ Chromium installed successfully!")
-    except Exception as e:
-        print(f"⚠️ Failed to install browser: {e}")
-
-install_playwright_browsers()
-
 app = Flask(__name__)
 
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfERmfP4+CfmHByFNjtOT7X3MqBI/5CPBHvbyvnWN7RPPSRY50OHPpCiMa9TueTi2VqWYtp/6V3K7je8DFTl3FT78NI0qLCOEtxGlwdB04t89/1O/w1cDnyilFU=')
@@ -29,6 +18,14 @@ LINE_PASSWORD = os.environ.get('Sakoversky@32')
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+def install_playwright_browsers():
+    try:
+        print("🌐 Checking & Installing Playwright Chromium...")
+        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+        print("✅ Chromium installed successfully!")
+    except Exception as e:
+        print(f"⚠️ Failed to install browser: {e}")
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -41,6 +38,9 @@ def callback():
     return 'OK'
 
 def async_booking_task(user_id, target_date, stadium_num, target_round):
+    # เรียกดาวน์โหลดเบราว์เซอร์เฉพาะตอนเริ่มรันงานเบื้องหลัง
+    install_playwright_browsers()
+    
     print(f"🚀 Starting Playwright Automation for User: {user_id}")
     result_msg = ""
     with sync_playwright() as p:
