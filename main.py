@@ -1,10 +1,10 @@
-
 import os
 import sys
+import time
 import traceback
 import threading
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -49,11 +49,27 @@ def callback():
 
     return 'OK'
 
-def async_booking_task(user_id, target_date, stadium_num, target_round):
+def scheduled_booking_task(user_id, run_time_str, target_date, stadium_num, target_round):
+    # คำนวณเวลาถอยหลัง หากไม่ใช่คำสั่ง 'now'
+    if run_time_str.lower() != 'now':
+        try:
+            now = datetime.now()
+            target_h, target_m = map(int, run_time_str.split(':'))
+            run_datetime = now.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
+            
+            # ถ้าเวลาที่ตั้งไว้ผ่านมาแล้วในวันนี้ ให้ถือว่าเป็นของวันพรุ่งนี้
+            if run_datetime < now:
+                run_datetime += timedelta(days=1)
+                
+            delay_seconds = (run_datetime - now).total_seconds()
+            print(f"⏳ Scheduled booking at {run_datetime.strftime('%H:%M:%S')}. Waiting {delay_seconds:.1f} seconds...")
+            time.sleep(delay_seconds)
+        except Exception as e:
+            print(f"⚠️ Time parsing error ({e}), running immediately...")
+
     install_playwright_browsers()
 
     print(f"🚀 Starting Playwright Automation for User: {user_id}")
-    print(f"Target Date: '{target_date}', Stadium: '{stadium_num}', Round: '{target_round}'")
     result_msg = ""
     with sync_playwright() as p:
         try:
@@ -67,7 +83,6 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
             print("🌐 Navigating to Hat Yai Booking Site...")
             page.goto("https://hatyaicity.go.th/reservesport/reserve_service/step1/3", timeout=60000)
 
-            # พยายามเข้าสู่ระบบด้วย LINE
             line_btn = page.locator("a:has-text('LINE'), button:has-text('LINE'), .btn-line")
             if line_btn.count() > 0:
                 line_btn.first.click()
@@ -89,7 +104,6 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
             page.evaluate(f"$('#choose_date').val('{target_date}');")
             page.evaluate(f"choose_date = '{target_date}';")
 
-            # สั่งรัน AJAX ดึงรอบสนาม
             page.evaluate(f"""
                 var url = "https://hatyaicity.go.th/reservesport/reserve_service/round_ajax";
                 var param = {{
@@ -107,14 +121,11 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
 
             page.wait_for_timeout(3000)
 
-            # ค้นหาข้อความรอบเวลาแบบยืดหยุ่น (Partial / Contains Match)
-            # ตัด " น." หรือช่องว่างส่วนเกินออกเพื่อใช้ค้นหา
             clean_round_search = target_round.replace(" น.", "").strip()
             print(f"⏰ Searching for locator with text: '{clean_round_search}'")
 
             target_locator = page.locator(f"#booking_round :text('{clean_round_search}')")
             if target_locator.count() == 0:
-                # ลองค้นหาแบบรวมหน้าเว็บ
                 target_locator = page.locator(f":text('{clean_round_search}')")
 
             if target_locator.count() > 0:
@@ -151,20 +162,22 @@ def handle_message(event):
     if text.startswith("จอง"):
         try:
             parts = text.split(" ")
-            target_date = parts[1]
-            stadium_num = parts[2]
-            # รวมคำสั่งด้านหลังทั้งหมดเป็นเวลา เพื่อป้องกันการตัดคำหลุด
-            target_round = " ".join(parts[3:]).strip()
+            run_time_str = parts[1]        # เวลารันบอท (เช่น 00:00 หรือ now)
+            target_date = parts[2]         # วันที่สนาม (เช่น 2026-09-06)
+            stadium_num = parts[3]         # เลขสนาม (เช่น 2)
+            target_round = " ".join(parts[4:]).strip() # รอบเวลาสนาม
+
+            time_info = "ทันที" if run_time_str.lower() == 'now' else f"เวลา {run_time_str} น."
 
             if line_bot_api:
                 line_bot_api.reply_message(
                     event.reply_token,
-                    TextSendMessage(text=f"⏳ รับคำสั่งเรียบร้อยแล้ว!\n📅 วันที่: {target_date}\n🏸 สนาม: {stadium_num}\n⏰ รอบ: {target_round}\nกำลังดำเนินการจองแบบ Background Process...")
+                    TextSendMessage(text=f"⏳ รับคำสั่งเรียบร้อยแล้ว!\n⏰ ตั้งเวลารันบอท: {time_info}\n📅 วันที่: {target_date}\n🏸 สนาม: {stadium_num}\n⏰ รอบสนาม: {target_round}\nบอทกำลังรอทำรายการตามเวลาที่กำหนด...")
                 )
 
             thread = threading.Thread(
-                target=async_booking_task,
-                args=(event.source.user_id, target_date, stadium_num, target_round)
+                target=scheduled_booking_task,
+                args=(event.source.user_id, run_time_str, target_date, stadium_num, target_round)
             )
             thread.start()
 
@@ -172,7 +185,7 @@ def handle_message(event):
             if line_bot_api:
                 line_bot_api.reply_message(
                     event.reply_token,
-                    TextSendMessage(text="❌ รูปแบบคำสั่งไม่ถูกต้อง!\nตัวอย่าง: จอง 2026-09-10 2 16:00 - 17:00 น.")
+                    TextSendMessage(text="❌ รูปแบบคำสั่งไม่ถูกต้อง!\n\nตัวอย่างรันทันที:\nจอง now 2026-09-06 2 16:00 - 17:00 น.\n\nตัวอย่างตั้งเวลา:\nจอง 00:00 2026-09-06 2 16:00 - 17:00 น.")
                 )
 
 if __name__ == "__main__":
