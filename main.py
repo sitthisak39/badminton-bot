@@ -14,7 +14,7 @@ LINE_CHANNEL_ACCESS_TOKEN = 'O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfE
 LINE_CHANNEL_SECRET = 'f343f78d02fbd5045282a9899cb5b248'
 
 # บัญชี LINE ที่ใช้เข้าสู่ระบบเว็บจองสนาม
-LINE_EMAIL = 'mirrorsak@gmail.com'
+LINE_EMAIL = 'jankong.sitthisak@gmail.com'
 LINE_PASSWORD = 'Sakoversky@32'
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
