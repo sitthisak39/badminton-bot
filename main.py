@@ -16,8 +16,26 @@ LINE_CHANNEL_SECRET = os.environ.get('f343f78d02fbd5045282a9899cb5b248')
 LINE_EMAIL = os.environ.get('jankong.sitthisak@gmail.com')
 LINE_PASSWORD = os.environ.get('Sakoversky@32')
 
-line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(LINE_CHANNEL_SECRET)
+import os
+import sys
+import threading
+import subprocess
+from datetime import datetime
+from flask import Flask, request, abort
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from playwright.sync_api import sync_playwright
+
+app = Flask(__name__)
+
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfERmfP4+CfmHByFNjtOT7X3MqBI/5CPBHvbyvnWN7RPPSRY50OHPpCiMa9TueTi2VqWYtp/6V3K7je8DFTl3FT78NI0qLCOEtxGlwdB04t89/1O/w1cDnyilFU=')
+LINE_CHANNEL_SECRET = os.environ.get('f343f78d02fbd5045282a9899cb5b248')
+LINE_EMAIL = os.environ.get('jankong.sitthisak@gmail.com')
+LINE_PASSWORD = os.environ.get('Sakoversky@32')
+
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
+handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
 
 def install_playwright_browsers():
     try:
@@ -29,6 +47,9 @@ def install_playwright_browsers():
 
 @app.route("/callback", methods=['POST'])
 def callback():
+    if not handler:
+        return 'LINE Channel Secret Not Configured', 500
+        
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
     try:
@@ -38,7 +59,6 @@ def callback():
     return 'OK'
 
 def async_booking_task(user_id, target_date, stadium_num, target_round):
-    # เรียกดาวน์โหลดเบราว์เซอร์เฉพาะตอนเริ่มรันงานเบื้องหลัง
     install_playwright_browsers()
     
     print(f"🚀 Starting Playwright Automation for User: {user_id}")
@@ -115,12 +135,13 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
             result_msg = f"❌ เกิดข้อผิดพลาดขณะจอง: {str(e)}"
 
     # ส่งข้อความผลลัพธ์กลับไปยังแชต LINE
-    try:
-        line_bot_api.push_message(user_id, TextSendMessage(text=result_msg))
-    except Exception as e:
-        print(f"❌ Failed to send LINE Push Message: {e}")
+    if line_bot_api:
+        try:
+            line_bot_api.push_message(user_id, TextSendMessage(text=result_msg))
+        except Exception as e:
+            print(f"❌ Failed to send LINE Push Message: {e}")
 
-@handler.add(MessageEvent, message=TextMessage)
+@handler.add(MessageEvent, message=TextMessage) if handler else lambda x: None
 def handle_message(event):
     text = event.message.text.strip()
     if text.startswith("จอง"):
@@ -130,10 +151,11 @@ def handle_message(event):
             stadium_num = parts[2]
             target_round = f"{parts[3]} {parts[4]} {parts[5]}"
 
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=f"⏳ รับคำสั่งเรียบร้อยแล้ว!\n📅 วันที่: {target_date}\n🏸 สนาม: {stadium_num}\n⏰ รอบ: {target_round}\nกำลังดำเนินการจองแบบ Background Process...")
-            )
+            if line_bot_api:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=f"⏳ รับคำสั่งเรียบร้อยแล้ว!\n📅 วันที่: {target_date}\n🏸 สนาม: {stadium_num}\n⏰ รอบ: {target_round}\nกำลังดำเนินการจองแบบ Background Process...")
+                )
 
             thread = threading.Thread(
                 target=async_booking_task,
@@ -142,10 +164,11 @@ def handle_message(event):
             thread.start()
 
         except Exception as e:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="❌ รูปแบบคำสั่งไม่ถูกต้อง!\nตัวอย่าง: จอง 2026-09-10 2 16:00 - 17:00 น.")
-            )
+            if line_bot_api:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="❌ รูปแบบคำสั่งไม่ถูกต้อง!\nตัวอย่าง: จอง 2026-09-10 2 16:00 - 17:00 น.")
+                )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
