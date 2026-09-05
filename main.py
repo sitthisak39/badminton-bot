@@ -16,24 +16,6 @@ LINE_CHANNEL_SECRET = os.environ.get('f343f78d02fbd5045282a9899cb5b248')
 LINE_EMAIL = os.environ.get('jankong.sitthisak@gmail.com')
 LINE_PASSWORD = os.environ.get('Sakoversky@32')
 
-import os
-import sys
-import threading
-import subprocess
-from datetime import datetime
-from flask import Flask, request, abort
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from playwright.sync_api import sync_playwright
-
-app = Flask(__name__)
-
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfERmfP4+CfmHByFNjtOT7X3MqBI/5CPBHvbyvnWN7RPPSRY50OHPpCiMa9TueTi2VqWYtp/6V3K7je8DFTl3FT78NI0qLCOEtxGlwdB04t89/1O/w1cDnyilFU=')
-LINE_CHANNEL_SECRET = os.environ.get('f343f78d02fbd5045282a9899cb5b248')
-LINE_EMAIL = os.environ.get('jankong.sitthisak@gmail.com')
-LINE_PASSWORD = os.environ.get('Sakoversky@32')
-
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
 
