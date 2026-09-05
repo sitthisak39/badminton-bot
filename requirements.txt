@@ -1,6 +1,5 @@
 Flask
 line-bot-sdk
-playwright
-gunicorn
-python-dateutil
 requests
+beautifulsoup4
+gunicorn
