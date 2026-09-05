@@ -18,10 +18,10 @@ LINE_CHANNEL_ACCESS_TOKEN = 'O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfE
 LINE_CHANNEL_SECRET = '57bb757a0b33c516d75e0ca9d17d3de7'
 LINE_EMAIL = 'jankong.sitthisak@gmail.com'
 LINE_PASSWORD = 'Sakoversky@32'
+
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
 
-# กำหนด Timezone Thailand (UTC+7)
 tz_th = timezone(timedelta(hours=7))
 
 def install_playwright_browsers():
@@ -54,7 +54,6 @@ def callback():
 def scheduled_booking_task(user_id, run_time_str, target_date, stadium_num, target_round):
     if run_time_str.lower() != 'now':
         try:
-            # ใช้เวลาตาม Timezone ไทย (UTC+7)
             now_th = datetime.now(tz_th)
             time_parts = list(map(int, run_time_str.split(':')))
             target_h = time_parts[0]
@@ -87,7 +86,9 @@ def scheduled_booking_task(user_id, run_time_str, target_date, stadium_num, targ
 
             print("🌐 Navigating to Hat Yai Booking Site...")
             page.goto("https://hatyaicity.go.th/reservesport/reserve_service/step1/3", timeout=60000)
+            page.wait_for_timeout(2000)
 
+            # เข้าสู่ระบบ LINE
             line_btn = page.locator("a:has-text('LINE'), button:has-text('LINE'), .btn-line")
             if line_btn.count() > 0:
                 line_btn.first.click()
@@ -105,10 +106,17 @@ def scheduled_booking_task(user_id, run_time_str, target_date, stadium_num, targ
                     allow_btn.click()
                     page.wait_for_timeout(2000)
 
-            print("📅 Setting Date & Triggering Round Fetch...")
-            page.evaluate(f"$('#choose_date').val('{target_date}');")
-            page.evaluate(f"choose_date = '{target_date}';")
+            print(f"📅 Selecting Date: {target_date}")
+            # กรอกวันที่ลง input
+            date_input = page.locator("#choose_date")
+            if date_input.count() > 0:
+                date_input.fill(target_date)
+                page.evaluate(f"$('#choose_date').val('{target_date}').change();")
+            
+            page.wait_for_timeout(1000)
 
+            print(f"🏸 Requesting Round for Stadium {stadium_num}...")
+            # เรียก AJAX ดึงรอบสนาม
             page.evaluate(f"""
                 var url = "https://hatyaicity.go.th/reservesport/reserve_service/round_ajax";
                 var param = {{
@@ -126,18 +134,21 @@ def scheduled_booking_task(user_id, run_time_str, target_date, stadium_num, targ
 
             page.wait_for_timeout(3000)
 
-            clean_round_search = target_round.replace(" น.", "").strip()
-            print(f"⏰ Searching for locator with text: '{clean_round_search}'")
+            # สกัดตัวเลขเวลา เช่น 16:00 จาก 16:00 - 17:00 น.
+            start_time = target_round.split('-')[0].strip() if '-' in target_round else target_round
+            print(f"⏰ Target Start Time: '{start_time}'")
 
-            target_locator = page.locator(f"#booking_round :text('{clean_round_search}')")
-            if target_locator.count() == 0:
-                target_locator = page.locator(f":text('{clean_round_search}')")
+            # พยายามหา element ของรอบเวลาด้วยวิธียืดหยุ่นหลายแบบ
+            round_locator = page.locator(f"#booking_round :text('{start_time}')")
+            if round_locator.count() == 0:
+                round_locator = page.locator(f":text('{start_time}')")
 
-            if target_locator.count() > 0:
+            if round_locator.count() > 0:
                 print("✅ Found round element! Clicking...")
-                target_locator.first.click()
+                round_locator.first.click()
                 page.wait_for_timeout(1000)
 
+                # ทำการกดยืนยันขั้นตอน
                 page.evaluate("if(typeof submitRound === 'function') submitRound();")
                 page.wait_for_timeout(1000)
                 page.evaluate("if(typeof submitStep1 === 'function') submitStep1();")
@@ -147,6 +158,9 @@ def scheduled_booking_task(user_id, run_time_str, target_date, stadium_num, targ
                 result_msg = f"🎉 บอททำรายการสำเร็จแล้ว!\nวันที่: {target_date}\nสนาม: {stadium_num}\nรอบ: {target_round}\nโปรดเข้าชำระเงินในระบบเว็บเทศบาลนครหาดใหญ่"
             else:
                 print("❌ Round element not found in DOM.")
+                # อ่านข้อความทั้งหมดในพื้นที่เลือกสนามเพื่อ Debug ลง Log
+                container_text = page.locator("#booking_round").text_content() if page.locator("#booking_round").count() > 0 else "NO_CONTAINER"
+                print(f"🔍 DOM Content inside #booking_round: {container_text[:200]}")
                 result_msg = f"❌ ไม่พบรอบเวลา {target_round} หรือสนามเต็มแล้ว"
 
             browser.close()
@@ -200,4 +214,3 @@ def handle_message(event):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
