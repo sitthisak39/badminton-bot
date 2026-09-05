@@ -1,6 +1,3 @@
-
-#LINE_EMAIL = 'jankong.sitthisak@gmail.com'
-#LINE_PASSWORD = 'Sakoversky@32'
 import os
 import re
 import sys
@@ -19,6 +16,8 @@ app = Flask(__name__)
 
 LINE_CHANNEL_ACCESS_TOKEN = 'O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfERmfP4+CfmHByFNjtOT7X3MqBI/5CPBHvbyvnWN7RPPSRY50OHPpCiMa9TueTi2VqWYtp/6V3K7je8DFTl3FT78NI0qLCOEtxGlwdB04t89/1O/w1cDnyilFU='
 LINE_CHANNEL_SECRET = '57bb757a0b33c516d75e0ca9d17d3de7'
+LINE_EMAIL = 'jankong.sitthisak@gmail.com'
+LINE_PASSWORD = 'Sakoversky@32'
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
