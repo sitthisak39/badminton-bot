@@ -4,13 +4,12 @@ import sys
 import time
 import traceback
 import threading
-import subprocess
+import requests
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
@@ -23,14 +22,6 @@ line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKE
 handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
 
 tz_th = timezone(timedelta(hours=7))
-
-def install_playwright_browsers():
-    try:
-        print("🌐 Checking & Installing Playwright Chromium...")
-        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-        print("✅ Chromium installed successfully!")
-    except Exception as e:
-        print(f"⚠️ Failed to install browser: {e}")
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -50,6 +41,69 @@ def callback():
         return 'Internal Error', 500
 
     return 'OK'
+
+def direct_api_booking(target_date, stadium_num, target_round):
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'X-Requested-With': 'XMLHttpRequest'
+    })
+
+    # 1. เข้าหน้าแรกเพื่อรับ Session Cookies
+    base_url = "https://hatyaicity.go.th/reservesport/reserve_service/step1/3"
+    print("🌐 Getting Session Cookies...")
+    session.get(base_url, timeout=15)
+
+    # 2. ดึงข้อมูลรอบเวลา
+    round_url = "https://hatyaicity.go.th/reservesport/reserve_service/round_ajax"
+    payload = {
+        'service_cid': '3',
+        'stadium_num': str(stadium_num),
+        'choose_date': str(target_date)
+    }
+
+    print(f"📡 Fetching rounds for Date: {target_date}, Court: {stadium_num}...")
+    res = session.post(round_url, data=payload, timeout=15)
+    
+    if res.status_code != 200:
+        return False, f"ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์เทศบาลได้ (HTTP {res.status_code})"
+
+    try:
+        data = res.json()
+        round_html = data.get('round', '')
+    except Exception:
+        round_html = res.text
+
+    # ค้นหา ID หรือรอบเวลาจาก Response HTML
+    start_time = target_round.split('-')[0].strip() if '-' in target_round else target_round
+    clean_time = start_time.replace(" น.", "").strip()
+
+    if clean_time not in round_html:
+        print(f"DEBUG Response HTML: {round_html[:300]}")
+        return False, f"ไม่พบรอบเวลา {target_round} ในระบบ หรือสนามถูกจองเต็มแล้ว"
+
+    # 3. ส่งคำสั่งยืนยันการจองรอบ
+    # หาค่า round_id จาก HTML ด้วย Regex
+    match = re.search(r'data-id=["\'](\d+)["\'][^>]*>' + re.escape(clean_time), round_html)
+    round_id = match.group(1) if match else None
+
+    submit_url = "https://hatyaicity.go.th/reservesport/reserve_service/save_round"
+    booking_payload = {
+        'service_cid': '3',
+        'stadium_num': str(stadium_num),
+        'choose_date': str(target_date),
+        'round_time': clean_time
+    }
+    if round_id:
+        booking_payload['round_id'] = round_id
+
+    print(f"⚡ Submitting booking request for round: {clean_time}...")
+    save_res = session.post(submit_url, data=booking_payload, timeout=15)
+
+    if save_res.status_code == 200:
+        return True, f"🎉 บอททำรายการจองสำเร็จแล้ว!\n📅 วันที่: {target_date}\n🏸 สนาม: {stadium_num}\n⏰ รอบ: {target_round}\nโปรดเข้าสู่ระบบเทศบาลนครหาดใหญ่เพื่อชำระเงิน"
+    else:
+        return False, f"เกิดข้อผิดพลาดในการส่งข้อมูลจอง (HTTP {save_res.status_code})"
 
 def scheduled_booking_task(user_id, run_time_str, target_date, stadium_num, target_round):
     if run_time_str.lower() != 'now':
@@ -71,103 +125,8 @@ def scheduled_booking_task(user_id, run_time_str, target_date, stadium_num, targ
         except Exception as e:
             print(f"⚠️ Time parsing error ({e}), running immediately...")
 
-    install_playwright_browsers()
-
-    print(f"🚀 Starting Playwright Automation for User: {user_id}")
-    result_msg = ""
-    with sync_playwright() as p:
-        try:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox"]
-            )
-            context = browser.new_context()
-            page = context.new_page()
-
-            print("🌐 Navigating to Hat Yai Booking Site...")
-            page.goto("https://hatyaicity.go.th/reservesport/reserve_service/step1/3", timeout=60000)
-            page.wait_for_timeout(2000)
-
-            # เข้าสู่ระบบ LINE
-            line_btn = page.locator("a:has-text('LINE'), button:has-text('LINE'), .btn-line")
-            if line_btn.count() > 0:
-                line_btn.first.click()
-                page.wait_for_timeout(2000)
-
-            if "access.line.me" in page.url:
-                print("🔑 Logging into LINE Account...")
-                page.fill("input[name='tid']", LINE_EMAIL)
-                page.fill("input[type='password']", LINE_PASSWORD)
-                page.click("button[type='submit']")
-                page.wait_for_timeout(3000)
-
-                allow_btn = page.locator("button:has-text('Allow'), button:has-text('อนุญาต')")
-                if allow_btn.count() > 0:
-                    allow_btn.click()
-                    page.wait_for_timeout(2000)
-
-            print(f"📅 Selecting Date: {target_date}")
-            # กรอกวันที่ลง input
-            date_input = page.locator("#choose_date")
-            if date_input.count() > 0:
-                date_input.fill(target_date)
-                page.evaluate(f"$('#choose_date').val('{target_date}').change();")
-            
-            page.wait_for_timeout(1000)
-
-            print(f"🏸 Requesting Round for Stadium {stadium_num}...")
-            # เรียก AJAX ดึงรอบสนาม
-            page.evaluate(f"""
-                var url = "https://hatyaicity.go.th/reservesport/reserve_service/round_ajax";
-                var param = {{
-                    service_cid: '3',
-                    stadium_num: '{stadium_num}',
-                    choose_date: '{target_date}',
-                }};
-                $.post(url, param, function(data) {{
-                    $('#booking_round').html(data['round']);
-                    $(".btn-skip-round").hide();
-                    $(".btn-choose-round").show();
-                    $("#popup-round").show();
-                }}, 'json');
-            """)
-
-            page.wait_for_timeout(3000)
-
-            # สกัดตัวเลขเวลา เช่น 16:00 จาก 16:00 - 17:00 น.
-            start_time = target_round.split('-')[0].strip() if '-' in target_round else target_round
-            print(f"⏰ Target Start Time: '{start_time}'")
-
-            # พยายามหา element ของรอบเวลาด้วยวิธียืดหยุ่นหลายแบบ
-            round_locator = page.locator(f"#booking_round :text('{start_time}')")
-            if round_locator.count() == 0:
-                round_locator = page.locator(f":text('{start_time}')")
-
-            if round_locator.count() > 0:
-                print("✅ Found round element! Clicking...")
-                round_locator.first.click()
-                page.wait_for_timeout(1000)
-
-                # ทำการกดยืนยันขั้นตอน
-                page.evaluate("if(typeof submitRound === 'function') submitRound();")
-                page.wait_for_timeout(1000)
-                page.evaluate("if(typeof submitStep1 === 'function') submitStep1();")
-                page.wait_for_timeout(2000)
-                page.evaluate("if(typeof submitStep2 === 'function') submitStep2();")
-                
-                result_msg = f"🎉 บอททำรายการสำเร็จแล้ว!\nวันที่: {target_date}\nสนาม: {stadium_num}\nรอบ: {target_round}\nโปรดเข้าชำระเงินในระบบเว็บเทศบาลนครหาดใหญ่"
-            else:
-                print("❌ Round element not found in DOM.")
-                # อ่านข้อความทั้งหมดในพื้นที่เลือกสนามเพื่อ Debug ลง Log
-                container_text = page.locator("#booking_round").text_content() if page.locator("#booking_round").count() > 0 else "NO_CONTAINER"
-                print(f"🔍 DOM Content inside #booking_round: {container_text[:200]}")
-                result_msg = f"❌ ไม่พบรอบเวลา {target_round} หรือสนามเต็มแล้ว"
-
-            browser.close()
-
-        except Exception as e:
-            print(f"❌ Error during booking: {str(e)}")
-            result_msg = f"❌ เกิดข้อผิดพลาดขณะจอง: {str(e)}"
+    print(f"🚀 Executing Direct API Task for User: {user_id}")
+    success, result_msg = direct_api_booking(target_date, stadium_num, target_round)
 
     if line_bot_api:
         try:
