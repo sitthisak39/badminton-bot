@@ -1,5 +1,6 @@
 import os
 import sys
+import traceback
 import threading
 import subprocess
 from datetime import datetime
@@ -11,10 +12,15 @@ from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfERmfP4+CfmHByFNjtOT7X3MqBI/5CPBHvbyvnWN7RPPSRY50OHPpCiMa9TueTi2VqWYtp/6V3K7je8DFTl3FT78NI0qLCOEtxGlwdB04t89/1O/w1cDnyilFU=')
-LINE_CHANNEL_SECRET = os.environ.get('f343f78d02fbd5045282a9899cb5b248')
-LINE_EMAIL = os.environ.get('jankong.sitthisak@gmail.com')
-LINE_PASSWORD = os.environ.get('Sakoversky@32')
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfERmfP4+CfmHByFNjtOT7X3MqBI/5CPBHvbyvnWN7RPPSRY50OHPpCiMa9TueTi2VqWYtp/6V3K7je8DFTl3FT78NI0qLCOEtxGlwdB04t89/1O/w1cDnyilFU=', '').strip()
+LINE_CHANNEL_SECRET = os.environ.get('f343f78d02fbd5045282a9899cb5b248', '').strip()
+LINE_EMAIL = os.environ.get('jankong.sitthisak@gmail.com', '').strip()
+LINE_PASSWORD = os.environ.get('Sakoversky@32', '').strip()
+
+print(f"--- Config Check ---")
+print(f"Token length: {len(LINE_CHANNEL_ACCESS_TOKEN)}")
+print(f"Secret length: {len(LINE_CHANNEL_SECRET)}")
+print(f"--------------------")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
@@ -30,19 +36,27 @@ def install_playwright_browsers():
 @app.route("/callback", methods=['POST'])
 def callback():
     if not handler:
+        print("❌ ERROR: Handler is not initialized (Check LINE_CHANNEL_SECRET)")
         return 'LINE Channel Secret Not Configured', 500
-        
-    signature = request.headers['X-Line-Signature']
+
+    signature = request.headers.get('X-Line-Signature', '')
     body = request.get_data(as_text=True)
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
+        print("❌ ERROR: Invalid LINE Signature")
         abort(400)
+    except Exception as e:
+        print(f"❌ ERROR in callback: {e}")
+        traceback.print_exc()
+        return 'Internal Error', 500
+
     return 'OK'
 
 def async_booking_task(user_id, target_date, stadium_num, target_round):
     install_playwright_browsers()
-    
+
     print(f"🚀 Starting Playwright Automation for User: {user_id}")
     result_msg = ""
     with sync_playwright() as p:
@@ -57,7 +71,6 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
             print("🌐 Navigating to Hat Yai Booking Site...")
             page.goto("https://hatyaicity.go.th/reservesport/reserve_service/step1/3", timeout=60000)
 
-            # พยายามเข้าสู่ระบบด้วย LINE
             line_btn = page.locator("a:has-text('LINE'), button:has-text('LINE'), .btn-line")
             if line_btn.count() > 0:
                 line_btn.first.click()
@@ -79,7 +92,6 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
             page.evaluate(f"choose_date = '{target_date}';")
             page.evaluate(f"$('#choose_date').val('{target_date}');")
 
-            # ดึงรอบเวลาผ่าน AJAX
             page.evaluate(f"""
                 var url = "https://hatyaicity.go.th/reservesport/reserve_service/round_ajax";
                 var param = {{
@@ -96,8 +108,7 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
             """)
 
             page.wait_for_timeout(2000)
-            
-            # คลิกเลือกรอบสนาม
+
             print(f"⏰ Selecting Round: {target_round}")
             target_locator = page.locator(f"text='{target_round}'")
             if target_locator.count() > 0:
@@ -116,7 +127,6 @@ def async_booking_task(user_id, target_date, stadium_num, target_round):
             print(f"❌ Error during booking: {str(e)}")
             result_msg = f"❌ เกิดข้อผิดพลาดขณะจอง: {str(e)}"
 
-    # ส่งข้อความผลลัพธ์กลับไปยังแชต LINE
     if line_bot_api:
         try:
             line_bot_api.push_message(user_id, TextSendMessage(text=result_msg))
