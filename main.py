@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import time
 import traceback
@@ -17,7 +18,6 @@ LINE_CHANNEL_ACCESS_TOKEN = 'O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfE
 LINE_CHANNEL_SECRET = '57bb757a0b33c516d75e0ca9d17d3de7'
 LINE_EMAIL = 'jankong.sitthisak@gmail.com'
 LINE_PASSWORD = 'Sakoversky@32'
-
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
@@ -50,14 +50,16 @@ def callback():
     return 'OK'
 
 def scheduled_booking_task(user_id, run_time_str, target_date, stadium_num, target_round):
-    # คำนวณเวลาถอยหลัง หากไม่ใช่คำสั่ง 'now'
     if run_time_str.lower() != 'now':
         try:
             now = datetime.now()
-            target_h, target_m = map(int, run_time_str.split(':'))
-            run_datetime = now.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
+            time_parts = list(map(int, run_time_str.split(':')))
+            target_h = time_parts[0]
+            target_m = time_parts[1]
+            target_s = time_parts[2] if len(time_parts) > 2 else 0
+
+            run_datetime = now.replace(hour=target_h, minute=target_m, second=target_s, microsecond=0)
             
-            # ถ้าเวลาที่ตั้งไว้ผ่านมาแล้วในวันนี้ ให้ถือว่าเป็นของวันพรุ่งนี้
             if run_datetime < now:
                 run_datetime += timedelta(days=1)
                 
@@ -161,31 +163,41 @@ def handle_message(event):
     text = event.message.text.strip()
     if text.startswith("จอง"):
         try:
-            parts = text.split(" ")
-            run_time_str = parts[1]        # เวลารันบอท (เช่น 00:00 หรือ now)
-            target_date = parts[2]         # วันที่สนาม (เช่น 2026-09-06)
-            stadium_num = parts[3]         # เลขสนาม (เช่น 2)
-            target_round = " ".join(parts[4:]).strip() # รอบเวลาสนาม
+            # ใช้ Regex ค้นหาองค์ประกอบแบบยืดหยุ่น
+            # กลุ่มที่ 1: เวลาที่จะรัน (now หรือ HH:MM หรือ HH:MM:SS)
+            # กลุ่มที่ 2: วันที่ (YYYY-MM-DD)
+            # กลุ่มที่ 3: เลขสนาม
+            # กลุ่มที่ 4: รอบเวลาสนาม
+            pattern = r"^จอง\s+(now|\d{1,2}:\d{2}(?::\d{2})?)\s+(\d{4}-\d{2}-\d{2})\s+(\d+)\s+(.+)$"
+            match = re.match(pattern, text, re.IGNORECASE)
 
-            time_info = "ทันที" if run_time_str.lower() == 'now' else f"เวลา {run_time_str} น."
+            if match:
+                run_time_str = match.group(1)
+                target_date = match.group(2)
+                stadium_num = match.group(3)
+                target_round = match.group(4).strip()
 
-            if line_bot_api:
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text=f"⏳ รับคำสั่งเรียบร้อยแล้ว!\n⏰ ตั้งเวลารันบอท: {time_info}\n📅 วันที่: {target_date}\n🏸 สนาม: {stadium_num}\n⏰ รอบสนาม: {target_round}\nบอทกำลังรอทำรายการตามเวลาที่กำหนด...")
+                time_info = "ทันที" if run_time_str.lower() == 'now' else f"เวลา {run_time_str} น."
+
+                if line_bot_api:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text=f"⏳ รับคำสั่งเรียบร้อยแล้ว!\n⏰ ตั้งเวลารันบอท: {time_info}\n📅 วันที่: {target_date}\n🏸 สนาม: {stadium_num}\n⏰ รอบสนาม: {target_round}\nบอทกำลังรอทำรายการตามเวลาที่กำหนด...")
+                    )
+
+                thread = threading.Thread(
+                    target=scheduled_booking_task,
+                    args=(event.source.user_id, run_time_str, target_date, stadium_num, target_round)
                 )
+                thread.start()
+            else:
+                raise ValueError("Invalid Format")
 
-            thread = threading.Thread(
-                target=scheduled_booking_task,
-                args=(event.source.user_id, run_time_str, target_date, stadium_num, target_round)
-            )
-            thread.start()
-
-        except Exception as e:
+        except Exception:
             if line_bot_api:
                 line_bot_api.reply_message(
                     event.reply_token,
-                    TextSendMessage(text="❌ รูปแบบคำสั่งไม่ถูกต้อง!\n\nตัวอย่างรันทันที:\nจอง now 2026-09-06 2 16:00 - 17:00 น.\n\nตัวอย่างตั้งเวลา:\nจอง 00:00 2026-09-06 2 16:00 - 17:00 น.")
+                    TextSendMessage(text="❌ รูปแบบคำสั่งไม่ถูกต้อง!\n\nตัวอย่างรันทันที:\nจอง now 2026-09-06 2 16:00 - 17:00 น.\n\nตัวอย่างตั้งเวลา:\nจอง 00:00:00 2026-09-06 2 16:00 - 17:00 น.")
                 )
 
 if __name__ == "__main__":
