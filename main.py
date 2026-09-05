@@ -5,7 +5,7 @@ import time
 import traceback
 import threading
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -18,9 +18,11 @@ LINE_CHANNEL_ACCESS_TOKEN = 'O6qWwRMnsiJGRyyKOUz284rryhltNQ2bR11LMh6gi9BRxdwalfE
 LINE_CHANNEL_SECRET = '57bb757a0b33c516d75e0ca9d17d3de7'
 LINE_EMAIL = 'jankong.sitthisak@gmail.com'
 LINE_PASSWORD = 'Sakoversky@32'
-
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
+
+# กำหนด Timezone Thailand (UTC+7)
+tz_th = timezone(timedelta(hours=7))
 
 def install_playwright_browsers():
     try:
@@ -52,19 +54,20 @@ def callback():
 def scheduled_booking_task(user_id, run_time_str, target_date, stadium_num, target_round):
     if run_time_str.lower() != 'now':
         try:
-            now = datetime.now()
+            # ใช้เวลาตาม Timezone ไทย (UTC+7)
+            now_th = datetime.now(tz_th)
             time_parts = list(map(int, run_time_str.split(':')))
             target_h = time_parts[0]
             target_m = time_parts[1]
             target_s = time_parts[2] if len(time_parts) > 2 else 0
 
-            run_datetime = now.replace(hour=target_h, minute=target_m, second=target_s, microsecond=0)
+            run_datetime = now_th.replace(hour=target_h, minute=target_m, second=target_s, microsecond=0)
             
-            if run_datetime < now:
+            if run_datetime < now_th:
                 run_datetime += timedelta(days=1)
                 
-            delay_seconds = (run_datetime - now).total_seconds()
-            print(f"⏳ Scheduled booking at {run_datetime.strftime('%H:%M:%S')}. Waiting {delay_seconds:.1f} seconds...")
+            delay_seconds = (run_datetime - now_th).total_seconds()
+            print(f"⏳ Scheduled booking at {run_datetime.strftime('%H:%M:%S')} (TH Time). Waiting {delay_seconds:.1f} seconds...")
             time.sleep(delay_seconds)
         except Exception as e:
             print(f"⚠️ Time parsing error ({e}), running immediately...")
@@ -163,11 +166,6 @@ def handle_message(event):
     text = event.message.text.strip()
     if text.startswith("จอง"):
         try:
-            # ใช้ Regex ค้นหาองค์ประกอบแบบยืดหยุ่น
-            # กลุ่มที่ 1: เวลาที่จะรัน (now หรือ HH:MM หรือ HH:MM:SS)
-            # กลุ่มที่ 2: วันที่ (YYYY-MM-DD)
-            # กลุ่มที่ 3: เลขสนาม
-            # กลุ่มที่ 4: รอบเวลาสนาม
             pattern = r"^จอง\s+(now|\d{1,2}:\d{2}(?::\d{2})?)\s+(\d{4}-\d{2}-\d{2})\s+(\d+)\s+(.+)$"
             match = re.match(pattern, text, re.IGNORECASE)
 
@@ -202,3 +200,4 @@ def handle_message(event):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
